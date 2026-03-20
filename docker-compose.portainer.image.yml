@@ -1,0 +1,19 @@
+services:
+  polymarket-arbitrage-bot:
+    image: polymarket-arbitrage-bot:latest
+    container_name: polymarket-arbitrage-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    command: ["node", "dist/main.js", "--simulation"]
+    volumes:
+      - polymarket_bot_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "ps | grep 'node dist/main.js' > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  polymarket_bot_data:
