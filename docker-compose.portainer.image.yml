@@ -3,8 +3,25 @@ services:
     image: polymarket-arbitrage-bot:latest
     container_name: polymarket-arbitrage-bot
     restart: unless-stopped
-    env_file:
-      - .env
+    environment:
+      GAMMA_API_URL: ${GAMMA_API_URL:-https://gamma-api.polymarket.com}
+      CLOB_API_URL: ${CLOB_API_URL:-https://clob.polymarket.com}
+      API_KEY: ${API_KEY:-}
+      API_SECRET: ${API_SECRET:-}
+      API_PASSPHRASE: ${API_PASSPHRASE:-}
+      PRIVATE_KEY: ${PRIVATE_KEY:-}
+      PROXY_WALLET_ADDRESS: ${PROXY_WALLET_ADDRESS:-}
+      SIGNATURE_TYPE: ${SIGNATURE_TYPE:-2}
+      CHECK_INTERVAL_MS: ${CHECK_INTERVAL_MS:-1000}
+      MARKET_CLOSURE_CHECK_INTERVAL_SECONDS: ${MARKET_CLOSURE_CHECK_INTERVAL_SECONDS:-20}
+      MARKETS: ${MARKETS:-btc}
+      DUMP_HEDGE_SHARES: ${DUMP_HEDGE_SHARES:-10}
+      DUMP_HEDGE_SUM_TARGET: ${DUMP_HEDGE_SUM_TARGET:-0.95}
+      DUMP_HEDGE_MOVE_THRESHOLD: ${DUMP_HEDGE_MOVE_THRESHOLD:-0.15}
+      DUMP_HEDGE_WINDOW_MINUTES: ${DUMP_HEDGE_WINDOW_MINUTES:-2}
+      DUMP_HEDGE_STOP_LOSS_MAX_WAIT_MINUTES: ${DUMP_HEDGE_STOP_LOSS_MAX_WAIT_MINUTES:-5}
+      DUMP_HEDGE_STOP_LOSS_PERCENTAGE: ${DUMP_HEDGE_STOP_LOSS_PERCENTAGE:-0.2}
+      PRODUCTION: ${PRODUCTION:-false}
     command: ["node", "dist/main.js", "--simulation"]
     volumes:
       - polymarket_bot_data:/data
