@@ -4,3 +4,6 @@ history.toml
 .env
 node_modules
 dist
+cache
+best.env
+polymarket_ga_optimizer.py
