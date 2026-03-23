@@ -235,26 +235,15 @@ export class DumpHedgeTrader {
         phase.leg1Side === "Up" ? s.downTokenId : s.upTokenId;
       const totalPrice = phase.leg1EntryPrice + oppositeAsk;
 
-      if (timeElapsedMinutes >= this.stopLossMaxWaitMinutes) {
+
+
+
+      const lossPerShare = totalPrice - 1.0;
+      const lossRatio = lossPerShare / totalPrice;
+
+
+      if (timeElapsedMinutes >= this.stopLossMaxWaitMinutes && lossRatio > this.stopLossPercentage) {
         if (oppositeTokenId) {
-          const lossPerShare = phase.leg1EntryPrice + oppositeAsk - 1.0;
-          const lossRatio = lossPerShare / phase.leg1EntryPrice;
-          if (lossRatio > this.stopLossPercentage) {
-            logPrintln(
-              `${marketName}: STOP LOSS SKIP - hedge too costly: $${(phase.leg1EntryPrice + oppositeAsk).toFixed(4)}/share, loss ${(lossRatio * 100).toFixed(2)}% > max ${(this.stopLossPercentage * 100).toFixed(2)}% | Holding leg1 to resolve`
-            );
-            s.phase = {
-              kind: "CycleComplete",
-              leg1Side: phase.leg1Side,
-              leg1EntryPrice: phase.leg1EntryPrice,
-              leg1Shares: phase.leg1Shares,
-              leg2Side: "",
-              leg2EntryPrice: 0,
-              leg2Shares: 0,
-              totalCost: phase.leg1EntryPrice * phase.leg1Shares,
-            };
-            return;
-          }
           logPrintln(
             `${marketName}: STOP LOSS TRIGGERED (Hedge not met after ${this.stopLossMaxWaitMinutes} minutes) | Buying opposite to hedge`
           );
