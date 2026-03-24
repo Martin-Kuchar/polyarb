@@ -8,7 +8,12 @@
     "start": "node dist/main.js",
     "sim": "node dist/main.js --simulation",
     "prod": "node dist/main.js --production",
-    "dev": "ts-node src/main.ts"
+    "dev": "ts-node src/main.ts",
+    "backtest": "python polymarket_ga_optimizer.py --mode backtest --resolution second --days 10",
+    "optimize": "python polymarket_ga_optimizer.py --mode optimize --resolution second --days 10",
+    "backtest:ts": "ts-node src/backtest.ts",
+    "optimize:ts": "ts-node src/optimize.ts",
+    "test:backtest": "ts-node src/backtestCloseLossTest.ts"
   },
   "engines": {
     "node": ">=16"

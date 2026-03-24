@@ -51,8 +51,16 @@ interface CycleTrade {
   expectedProfit: number;
 }
 
+export interface DumpHedgeTraderStats {
+  periodsTraded: number;
+  cyclesHedged: number;
+  forcedStopHedges: number;
+  upPumpsDetected: number;
+  downPumpsDetected: number;
+}
+
 export class DumpHedgeTrader {
-  private api: PolymarketApi;
+  private api: PolymarketApi | null;
   private simulationMode: boolean;
   private shares: number;
   private sumTarget: number;
@@ -64,9 +72,14 @@ export class DumpHedgeTrader {
   private trades = new Map<string, CycleTrade>();
   private totalProfit = 0;
   private periodProfit = 0;
+  private periodsTraded = 0;
+  private cyclesHedged = 0;
+  private forcedStopHedges = 0;
+  private upPumpsDetected = 0;
+  private downPumpsDetected = 0;
 
   constructor(
-    api: PolymarketApi,
+    api: PolymarketApi | null,
     simulationMode: boolean,
     shares: number,
     sumTarget: number,
@@ -90,7 +103,7 @@ export class DumpHedgeTrader {
     const marketData: MarketData = snapshot.btcMarket15m;
     const periodTimestamp = snapshot.btc15mPeriodTimestamp;
     const conditionId = marketData.conditionId;
-    const currentTime = Math.floor(Date.now() / 1000);
+    const currentTime = Math.floor(snapshot.timestamp / 1000);
 
     let state = this.marketStates.get(conditionId);
     const shouldReset =
@@ -161,6 +174,7 @@ export class DumpHedgeTrader {
       if (currentTime > phase.windowEndTime) return;
 
       if (this.checkDump(s.upPriceHistory, currentTime)) {
+        this.upPumpsDetected += 1;
         logPrintln(
           `${marketName}: UP dump detected! Buying ${this.shares} shares @ $${upAsk.toFixed(4)}`
         );
@@ -188,11 +202,13 @@ export class DumpHedgeTrader {
             leg1Shares: this.shares,
             leg1Timestamp: currentTime,
           };
+          this.periodsTraded += 1;
         }
         return;
       }
 
       if (this.checkDump(s.downPriceHistory, currentTime)) {
+        this.downPumpsDetected += 1;
         logPrintln(
           `${marketName}: DOWN dump detected! Buying ${this.shares} shares @ $${downAsk.toFixed(4)}`
         );
@@ -220,6 +236,7 @@ export class DumpHedgeTrader {
             leg1Shares: this.shares,
             leg1Timestamp: currentTime,
           };
+          this.periodsTraded += 1;
         }
         return;
       }
@@ -244,6 +261,7 @@ export class DumpHedgeTrader {
 
       if (timeElapsedMinutes >= this.stopLossMaxWaitMinutes && lossRatio > this.stopLossPercentage) {
         if (oppositeTokenId) {
+          this.forcedStopHedges += 1;
           logPrintln(
             `${marketName}: STOP LOSS TRIGGERED (Hedge not met after ${this.stopLossMaxWaitMinutes} minutes) | Buying opposite to hedge`
           );
@@ -295,6 +313,7 @@ export class DumpHedgeTrader {
           `${marketName}: Cycle complete! Locked in ~${profitPercent.toFixed(2)}% profit | Expected profit: $${expectedProfit.toFixed(2)}`
         );
 
+        this.cyclesHedged += 1;
         this.periodProfit += expectedProfit;
         this.totalProfit += expectedProfit;
 
@@ -384,6 +403,9 @@ export class DumpHedgeTrader {
     } else {
       const size = Math.round(shares * 10000) / 10000;
       try {
+        if (!this.api) {
+          throw new Error("PolymarketApi is required for live order placement");
+        }
         await this.api.placeMarketOrder(tokenId, size, "BUY");
         logPrintln("REAL: Order placed");
       } catch (e) {
@@ -436,6 +458,7 @@ export class DumpHedgeTrader {
       `${marketName}: Stop loss hedge complete! Expected profit: $${expectedProfit.toFixed(2)} (${profitPercent.toFixed(2)}%)`
     );
 
+    this.cyclesHedged += 1;
     this.periodProfit += expectedProfit;
     this.totalProfit += expectedProfit;
 
@@ -522,6 +545,9 @@ export class DumpHedgeTrader {
 
       let market;
       try {
+        if (!this.api) {
+          throw new Error("PolymarketApi is required for market closure checks");
+        }
         market = await this.api.getMarket(trade.conditionId);
       } catch (e) {
         console.warn("Failed to fetch market:", e);
@@ -552,6 +578,7 @@ export class DumpHedgeTrader {
         if (upIsWinner) {
           if (!this.simulationMode && trade.upTokenId) {
             try {
+              if (!this.api) throw new Error("PolymarketApi is required for token redemption");
               await this.api.redeemTokens(
                 trade.conditionId,
                 trade.upTokenId,
@@ -579,6 +606,7 @@ export class DumpHedgeTrader {
         if (downIsWinner) {
           if (!this.simulationMode && trade.downTokenId) {
             try {
+              if (!this.api) throw new Error("PolymarketApi is required for token redemption");
               await this.api.redeemTokens(
                 trade.conditionId,
                 trade.downTokenId,
@@ -633,5 +661,66 @@ export class DumpHedgeTrader {
 
   async getPeriodProfit(): Promise<number> {
     return this.periodProfit;
+  }
+
+  getStats(): DumpHedgeTraderStats {
+    return {
+      periodsTraded: this.periodsTraded,
+      cyclesHedged: this.cyclesHedged,
+      forcedStopHedges: this.forcedStopHedges,
+      upPumpsDetected: this.upPumpsDetected,
+      downPumpsDetected: this.downPumpsDetected,
+    };
+  }
+
+  finalizePeriodAtClose(
+    conditionId: string,
+    periodTimestamp: number,
+    upClosePrice: number,
+    downClosePrice: number,
+    resolvedWinnerSide?: "Up" | "Down" | null
+  ): void {
+    const state = this.marketStates.get(conditionId);
+    if (!state || state.periodTimestamp !== periodTimestamp) return;
+    if (state.phase.kind !== "WaitingForHedge") return;
+
+    const phase = state.phase;
+    if (!resolvedWinnerSide) {
+      // Live bot settles only after market resolution. If winner is unknown,
+      // keep this position unresolved to avoid synthetic PnL from last-tick inference.
+      return;
+    }
+
+    const winnerSide = resolvedWinnerSide;
+    const leg1Won = phase.leg1Side === winnerSide;
+    const realizedProfit = leg1Won
+      ? phase.leg1Shares * (1 - phase.leg1EntryPrice)
+      : -phase.leg1Shares * phase.leg1EntryPrice;
+
+    this.periodProfit += realizedProfit;
+    this.totalProfit += realizedProfit;
+
+    logPrintln(
+      `${conditionId.slice(0, 8)}: Period closed before hedge | Leg1=${phase.leg1Side} @ $${phase.leg1EntryPrice.toFixed(4)} | Winner=${winnerSide} | Realized PnL=$${realizedProfit.toFixed(2)}`
+    );
+
+    state.phase = {
+      kind: "CycleComplete",
+      leg1Side: phase.leg1Side,
+      leg1EntryPrice: phase.leg1EntryPrice,
+      leg1Shares: phase.leg1Shares,
+      leg2Side: "",
+      leg2EntryPrice: 0,
+      leg2Shares: 0,
+      totalCost: phase.leg1EntryPrice * phase.leg1Shares,
+    };
+    state.closureChecked = true;
+
+    const marketKey = `${conditionId}:${periodTimestamp}`;
+    const trade = this.trades.get(marketKey);
+    if (trade) {
+      trade.expectedProfit = realizedProfit;
+      this.trades.delete(marketKey);
+    }
   }
 }

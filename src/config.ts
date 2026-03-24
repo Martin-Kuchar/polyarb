@@ -1,6 +1,10 @@
 import dotenv from "dotenv";
 
-dotenv.config();
+dotenv.config(
+  process.env.DOTENV_CONFIG_PATH
+    ? { path: process.env.DOTENV_CONFIG_PATH }
+    : undefined
+);
 
 function env(key: string, defaultValue?: string): string {
   const v = process.env[key] ?? defaultValue;
