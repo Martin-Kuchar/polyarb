@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import path from "path";
 
 let historyStream: fs.WriteStream | null = null;
 let loggingEnabled = true;
@@ -7,9 +8,13 @@ export function setLoggingEnabled(enabled: boolean): void {
   loggingEnabled = enabled;
 }
 
-export function initHistoryLog(path: string = "cache/history.toml"): void {
+export function initHistoryLog(filePath: string = "cache/history.toml"): void {
   if (historyStream) return;
-  historyStream = fs.createWriteStream(path, { flags: "a" });
+  const dir = path.dirname(filePath);
+  if (dir && dir !== ".") {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  historyStream = fs.createWriteStream(filePath, { flags: "a" });
 }
 
 export function logToHistory(message: string): void {
