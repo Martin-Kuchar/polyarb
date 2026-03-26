@@ -8,7 +8,7 @@ export function setLoggingEnabled(enabled: boolean): void {
   loggingEnabled = enabled;
 }
 
-export function initHistoryLog(filePath: string = "cache/history.toml"): void {
+export function initHistoryLog(filePath: string = "history.toml"): void {
   if (historyStream) return;
   const dir = path.dirname(filePath);
   if (dir && dir !== ".") {

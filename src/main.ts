@@ -88,7 +88,7 @@ async function discoverMarketForAsset(
 // --- Online learning ---
 const ONLINE_OPT_POPULATION = 20;
 const ONLINE_OPT_GENERATIONS = 10;
-const ONLINE_HISTORY_PATH = path.resolve("cache", "history.toml");
+const ONLINE_HISTORY_PATH = path.resolve("history.toml");
 const ONLINE_REPORT_PATH = path.resolve("cache", "ga_online_result.json");
 
 let onlineOptFitness = -Infinity;
@@ -180,7 +180,7 @@ async function runOnlineOptimize(trader: DumpHedgeTrader): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  initHistoryLog("cache/history.toml");
+  initHistoryLog("history.toml");
 
   const args = parseArgs();
   const config = loadConfig();

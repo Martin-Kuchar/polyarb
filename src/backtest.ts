@@ -21,7 +21,7 @@ function parseArgs(): { filePath: string; reportPath?: string } {
   return {
     filePath: explicitFile
       ? path.resolve(explicitFile)
-      : path.resolve(process.cwd(), "cache", "history.toml"),
+      : path.resolve(process.cwd(), "history.toml"),
     reportPath: explicitReport ? path.resolve(explicitReport) : undefined,
   };
 }

@@ -33,7 +33,7 @@ function parseArgs(): CliArgs {
     return index >= 0 ? args[index + 1] : undefined;
   };
   return {
-    filePath: path.resolve(getValue("--file") ?? path.join("cache", "history.toml")),
+    filePath: path.resolve(getValue("--file") ?? path.join("history.toml")),
     population: Number(getValue("--population") ?? "40"),
     generations: Number(getValue("--generations") ?? "20"),
     elite: Number(getValue("--elite") ?? "8"),
