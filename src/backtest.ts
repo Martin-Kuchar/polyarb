@@ -21,7 +21,7 @@ function parseArgs(): { filePath: string; reportPath?: string } {
   return {
     filePath: explicitFile
       ? path.resolve(explicitFile)
-      : path.resolve(process.cwd(), "cache", "btc_15m_second_history.json"),
+      : path.resolve(process.cwd(), "cache", "history.toml"),
     reportPath: explicitReport ? path.resolve(explicitReport) : undefined,
   };
 }
@@ -74,9 +74,9 @@ async function printResults(
     stopLossPercentage: config.trading.dumpHedgeStopLossPercentage,
   });
 
-  console.log(`Loaded BTC 15m second history from JSON: ${filePath}`);
-  if (payload.meta?.days != null) {
-    console.log(`Cache meta: days=${payload.meta.days} count=${payload.meta.count ?? histories.length}`);
+  console.log(`Loaded BTC 15m history log: ${filePath}`);
+  if (payload.meta?.source) {
+    console.log(`History source: ${payload.meta.source} count=${payload.meta.count ?? histories.length}`);
   }
   console.log(`Loaded ${histories.length} BTC 15m histories with ${pointCount} price points across ${histories.length} periods`);
   console.log("");

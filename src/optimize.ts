@@ -33,7 +33,7 @@ function parseArgs(): CliArgs {
     return index >= 0 ? args[index + 1] : undefined;
   };
   return {
-    filePath: path.resolve(getValue("--file") ?? path.join("cache", "btc_15m_second_history.json")),
+    filePath: path.resolve(getValue("--file") ?? path.join("cache", "history.toml")),
     population: Number(getValue("--population") ?? "40"),
     generations: Number(getValue("--generations") ?? "20"),
     elite: Number(getValue("--elite") ?? "8"),
@@ -172,9 +172,9 @@ async function main(): Promise<void> {
   const payload = await loadHistoricalPayload(args.filePath);
   const histories = normalizeHistories(payload);
   const pointCount = histories.reduce((sum, history) => sum + history.points.length, 0);
-  console.log(`Loaded BTC 15m second history from JSON: ${args.filePath}`);
-  if (payload.meta?.days != null) {
-    console.log(`Cache meta: days=${payload.meta.days} count=${payload.meta.count ?? histories.length}`);
+  console.log(`Loaded BTC 15m history log: ${args.filePath}`);
+  if (payload.meta?.source) {
+    console.log(`History source: ${payload.meta.source} count=${payload.meta.count ?? histories.length}`);
   }
   console.log(`Loaded ${histories.length} BTC 15m histories with ${pointCount} price points across ${histories.length} periods`);
 

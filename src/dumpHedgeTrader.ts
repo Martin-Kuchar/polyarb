@@ -673,6 +673,25 @@ export class DumpHedgeTrader {
     };
   }
 
+  updateSettings(settings: {
+    sumTarget: number;
+    moveThreshold: number;
+    windowMinutes: number;
+    stopLossMaxWaitMinutes: number;
+    stopLossPercentage: number;
+  }): void {
+    this.sumTarget = settings.sumTarget;
+    this.moveThreshold = settings.moveThreshold;
+    this.windowMinutes = settings.windowMinutes;
+    this.stopLossMaxWaitMinutes = settings.stopLossMaxWaitMinutes;
+    this.stopLossPercentage = settings.stopLossPercentage;
+    logPrintln(
+      `Online optimizer: settings updated | sumTarget=${settings.sumTarget} ` +
+        `moveThreshold=${settings.moveThreshold} windowMinutes=${settings.windowMinutes} ` +
+        `stopLossMaxWait=${settings.stopLossMaxWaitMinutes} stopLossPct=${settings.stopLossPercentage}`
+    );
+  }
+
   finalizePeriodAtClose(
     conditionId: string,
     periodTimestamp: number,

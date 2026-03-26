@@ -176,15 +176,14 @@ If you don’t set `API_KEY` / `API_SECRET` / `API_PASSPHRASE`, the bot derives 
 
 ### Historical backtesting
 
-- `npm run backtest` fetches fresh BTC 15m trade data for the last 10 days, builds a 1-second replay series, stores it in `cache/btc_15m_second_history.json`, and replays the current strategy values from `.env`.
-- `npm run backtest:ts` reads `cache/btc_15m_second_history.json` directly in TypeScript and prints the current `.env` strategy backtest summary.
-- `npm run optimize` runs GA on second-level BTC 15m replay data by default (`--resolution second --days 10 --refresh`) so the 1:1 simulation dump logic has valid sub-5-second moves to evaluate.
-- Strategy replay and GA evaluation now run in TypeScript. The Python script is used only to fetch/cache historical data and then delegates execution to the TS engine.
+- `npm run backtest` replays the current strategy values from `.env` against `cache/history.toml`.
+- `npm run backtest:ts` reads `cache/history.toml` directly in TypeScript and prints the current `.env` strategy backtest summary.
+- `npm run optimize` runs GA on the same `cache/history.toml` replay log.
+- Strategy replay and GA evaluation run in TypeScript. The Python script is now only a CLI compatibility wrapper that delegates to the TS engine.
 - GA optimization updates only tunable dump-and-hedge keys (`DUMP_HEDGE_SUM_TARGET`, `DUMP_HEDGE_MOVE_THRESHOLD`, `DUMP_HEDGE_WINDOW_MINUTES`, `DUMP_HEDGE_STOP_LOSS_MAX_WAIT_MINUTES`, `DUMP_HEDGE_STOP_LOSS_PERCENTAGE`).
 - Polling and market keys (`CHECK_INTERVAL_MS`, `MARKET_CLOSURE_CHECK_INTERVAL_SECONDS`, `MARKETS`) and fixed shares (`DUMP_HEDGE_SHARES`) are not optimized or emitted in the generated env block.
-- To backtest a different env block, run `python polymarket_ga_optimizer.py --mode backtest --resolution second --days 10 --refresh --env-file best.env`.
-- To use the older minute-bar source explicitly, run `python polymarket_ga_optimizer.py --mode backtest --resolution minute --days 10 --refresh`.
-- For GA, minute resolution can produce zero trades with strict 1:1 simulation logic because dump detection requires a 1-5 second gap. Use `--resolution second`.
+- To backtest a different env block, run `python polymarket_ga_optimizer.py --mode backtest --env-file best.env`.
+- To use a different log file, run `python polymarket_ga_optimizer.py --mode backtest --cache-file path/to/history.toml`.
 - Backtest and optimizer reports are written to `cache/backtest_last_result.json` and `cache/ga_last_result.json`.
 
 ## 📦 Available Scripts
@@ -196,10 +195,10 @@ If you don’t set `API_KEY` / `API_SECRET` / `API_PASSPHRASE`, the bot derives 
 | `npm run sim` | Run in simulation mode explicitly |
 | `npm run prod` | Run in production (real trades) |
 | `npm run dev` | Run with ts-node (development) |
-| `npm run backtest` | Fetch 10 days of BTC 15m trade data, build 1-second replay points, and backtest current `.env` strategy values |
-| `npm run backtest:ts` | Replay `cache/btc_15m_second_history.json` in TypeScript and print the backtest summary |
+| `npm run backtest` | Replay `cache/history.toml` and backtest current `.env` strategy values |
+| `npm run backtest:ts` | Replay `cache/history.toml` in TypeScript and print the backtest summary |
 | `npm run optimize` | Run the BTC 15m GA optimizer on cached history |
-| `npm run optimize:ts` | Run the TypeScript GA optimizer directly on `cache/btc_15m_second_history.json` |
+| `npm run optimize:ts` | Run the TypeScript GA optimizer directly on `cache/history.toml` |
 
 ## 🐳 Docker (optional)
 

@@ -1,3 +1,6 @@
+import { spawn } from "child_process";
+import { readFile, writeFile } from "fs/promises";
+import path from "path";
 import { loadConfig } from "./config";
 import { PolymarketApi } from "./api";
 import { MarketMonitor } from "./monitor";
@@ -32,10 +35,10 @@ async function discoverMarketForAsset(
           );
         })();
 
-  const periodDurationSecs = 900;
+  const periodDurationSecs = 300;
   const currentTime = Math.floor(Date.now() / 1000);
   const roundedTime = Math.floor(currentTime / periodDurationSecs) * periodDurationSecs;
-  const timeframeStr = "15m";
+  const timeframeStr = "5m";
   const slug = `${slugPrefix}-updown-${timeframeStr}-${roundedTime}`;
 
   const seenIds = new Set<string>();
@@ -82,8 +85,102 @@ async function discoverMarketForAsset(
   );
 }
 
+// --- Online learning ---
+const ONLINE_OPT_POPULATION = 20;
+const ONLINE_OPT_GENERATIONS = 10;
+const ONLINE_HISTORY_PATH = path.resolve("cache", "history.toml");
+const ONLINE_REPORT_PATH = path.resolve("cache", "ga_online_result.json");
+
+let onlineOptFitness = -Infinity;
+let isOptimizing = false;
+let lastOptimizedPeriod = 0;
+
+async function patchEnvFile(settings: {
+  sumTarget: number;
+  moveThreshold: number;
+  windowMinutes: number;
+  stopLossMaxWaitMinutes: number;
+  stopLossPercentage: number;
+}): Promise<void> {
+  try {
+    let content = await readFile(".env", "utf8");
+    content = content.replace(/^DUMP_HEDGE_SUM_TARGET=.*/m, `DUMP_HEDGE_SUM_TARGET=${settings.sumTarget}`);
+    content = content.replace(/^DUMP_HEDGE_MOVE_THRESHOLD=.*/m, `DUMP_HEDGE_MOVE_THRESHOLD=${settings.moveThreshold}`);
+    content = content.replace(/^DUMP_HEDGE_WINDOW_MINUTES=.*/m, `DUMP_HEDGE_WINDOW_MINUTES=${settings.windowMinutes}`);
+    content = content.replace(/^DUMP_HEDGE_STOP_LOSS_MAX_WAIT_MINUTES=.*/m, `DUMP_HEDGE_STOP_LOSS_MAX_WAIT_MINUTES=${settings.stopLossMaxWaitMinutes}`);
+    content = content.replace(/^DUMP_HEDGE_STOP_LOSS_PERCENTAGE=.*/m, `DUMP_HEDGE_STOP_LOSS_PERCENTAGE=${settings.stopLossPercentage}`);
+    await writeFile(".env", content, "utf8");
+    console.error(`[OnlineOpt] .env updated`);
+  } catch (e) {
+    console.warn("[OnlineOpt] Failed to patch .env:", e);
+  }
+}
+
+async function runOnlineOptimize(trader: DumpHedgeTrader): Promise<void> {
+  if (isOptimizing) return;
+  isOptimizing = true;
+  console.error(`[OnlineOpt] Starting background GA (pop=${ONLINE_OPT_POPULATION} gen=${ONLINE_OPT_GENERATIONS})...`);
+  try {
+    const tsNode = path.join("node_modules", ".bin", "ts-node");
+    await new Promise<void>((resolve) => {
+      const child = spawn(
+        tsNode,
+        [
+          "src/optimize.ts",
+          "--file", ONLINE_HISTORY_PATH,
+          "--population", String(ONLINE_OPT_POPULATION),
+          "--generations", String(ONLINE_OPT_GENERATIONS),
+          "--report-path", ONLINE_REPORT_PATH,
+        ],
+        { shell: true, stdio: ["ignore", "ignore", "inherit"] }
+      );
+      child.on("close", () => resolve());
+      child.on("error", () => resolve());
+    });
+
+    const raw = await readFile(ONLINE_REPORT_PATH, "utf8");
+    const result = JSON.parse(raw) as {
+      stats: { fitness: number };
+      settings: {
+        dump_hedge_sum_target: number;
+        dump_hedge_move_threshold: number;
+        dump_hedge_window_minutes: number;
+        dump_hedge_stop_loss_max_wait_minutes: number;
+        dump_hedge_stop_loss_percentage: number;
+      };
+    };
+
+    const newFitness = result.stats.fitness;
+    if (newFitness > onlineOptFitness) {
+      const s = {
+        sumTarget: result.settings.dump_hedge_sum_target,
+        moveThreshold: result.settings.dump_hedge_move_threshold,
+        windowMinutes: result.settings.dump_hedge_window_minutes,
+        stopLossMaxWaitMinutes: result.settings.dump_hedge_stop_loss_max_wait_minutes,
+        stopLossPercentage: result.settings.dump_hedge_stop_loss_percentage,
+      };
+      onlineOptFitness = newFitness;
+      trader.updateSettings(s);
+      console.error(
+        `[OnlineOpt] Improved! fitness=${newFitness.toFixed(4)} ` +
+          `sumTarget=${s.sumTarget} moveThreshold=${s.moveThreshold} ` +
+          `windowMinutes=${s.windowMinutes} stopLossMaxWait=${s.stopLossMaxWaitMinutes} stopLossPct=${s.stopLossPercentage}`
+      );
+      await patchEnvFile(s);
+    } else {
+      console.error(
+        `[OnlineOpt] No improvement. best=${onlineOptFitness.toFixed(4)} new=${newFitness.toFixed(4)}`
+      );
+    }
+  } catch (e) {
+    console.warn("[OnlineOpt] Error:", e);
+  } finally {
+    isOptimizing = false;
+  }
+}
+
 async function main(): Promise<void> {
-  initHistoryLog("history.toml");
+  initHistoryLog("cache/history.toml");
 
   const args = parseArgs();
   const config = loadConfig();
@@ -216,6 +313,11 @@ async function main(): Promise<void> {
           const newMarket = await discoverMarketForAsset(api, asset);
           await monitor.updateMarket(newMarket);
           await trader.resetPeriod();
+          // Fire-and-forget online learning: re-optimize on live history after each period
+          if (currentPeriod !== lastOptimizedPeriod) {
+            lastOptimizedPeriod = currentPeriod;
+            runOnlineOptimize(trader).catch(() => {});
+          }
         } catch (e) {
           console.warn(`Failed to discover new ${marketName} market:`, e);
           await new Promise((r) => setTimeout(r, 10000));

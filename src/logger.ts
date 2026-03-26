@@ -7,7 +7,7 @@ export function setLoggingEnabled(enabled: boolean): void {
   loggingEnabled = enabled;
 }
 
-export function initHistoryLog(path: string = "history.toml"): void {
+export function initHistoryLog(path: string = "cache/history.toml"): void {
   if (historyStream) return;
   historyStream = fs.createWriteStream(path, { flags: "a" });
 }

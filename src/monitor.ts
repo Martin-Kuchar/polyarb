@@ -139,8 +139,8 @@ export class MarketMonitor {
     };
     const upStr = upPrice ? formatPrice(upPrice) : "N/A";
     const downStr = downPrice ? formatPrice(downPrice) : "N/A";
-    //const line = `${this.marketName} Up Token ${upStr} Down Token ${downStr} remaining time:${formatRemaining(remaining)} market_timestamp:${btc15mTimestamp}\n`;
-    //logToHistory(line);
+    const line = `${this.marketName} Up Token ${upStr} Down Token ${downStr} remaining time:${formatRemaining(remaining)} market_timestamp:${btc15mTimestamp}\n`;
+    logToHistory(line);
 
     const marketData: MarketData = {
       conditionId,

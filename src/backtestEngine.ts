@@ -1,4 +1,5 @@
-import { readFile } from "fs/promises";
+import { createReadStream } from "fs";
+import { createInterface } from "readline";
 import { DumpHedgeTrader } from "./dumpHedgeTrader";
 import type { MarketSnapshot } from "./models";
 
@@ -6,6 +7,10 @@ export interface HistoricalPoint {
   timestamp: number;
   up_price: number;
   down_price: number;
+  up_bid?: number;
+  up_ask?: number;
+  down_bid?: number;
+  down_ask?: number;
 }
 
 export interface HistoricalPeriod {
@@ -18,8 +23,7 @@ export interface HistoricalPeriod {
 
 export interface HistoricalPayload {
   meta?: {
-    days?: number;
-    fetched_at?: number;
+    source?: string;
     count?: number;
   };
   histories: HistoricalPeriod[];
@@ -35,6 +39,63 @@ export interface ReplaySettings {
 }
 
 const BACKTEST_SYNTHETIC_SPREAD = 0.01;
+const PERIOD_DURATION_SECONDS = 15 * 60;
+const BTC_QUOTE_LINE_PATTERN =
+  /^BTC 15m Up Token BID:\$(\d+(?:\.\d+)?) ASK:\$(\d+(?:\.\d+)?) Down Token BID:\$(\d+(?:\.\d+)?) ASK:\$(\d+(?:\.\d+)?) remaining time:(.+) market_timestamp:(\d+)$/;
+const PERIOD_RESET_LINE_PATTERN = /^Dump-Hedge Trader: Period reset$/;
+
+function clampProbability(value: number): number {
+  return Math.max(0.001, Math.min(0.999, value));
+}
+
+function clampBid(value: number, ask: number): number {
+  return Math.max(0, Math.min(ask, value));
+}
+
+function parseRemainingTimeSeconds(raw: string): number | null {
+  const match = raw.trim().match(/^(?:(\d+)m\s*)?(?:(\d+)s)?$/);
+  if (!match) return null;
+
+  const minutes = match[1] ? Number(match[1]) : 0;
+  const seconds = match[2] ? Number(match[2]) : 0;
+  if (!Number.isFinite(minutes) || !Number.isFinite(seconds)) return null;
+  return minutes * 60 + seconds;
+}
+
+function createHistoricalPeriod(periodTs: number, sequence: number): HistoricalPeriod {
+  return {
+    slug: "btc-15m",
+    period_ts: periodTs,
+    condition_id: `btc-15m-${periodTs}-${sequence}`,
+    resolved_winner: null,
+    points: [],
+  };
+}
+
+function inferResolvedWinner(points: HistoricalPoint[], periodTs: number): "Up" | "Down" | null {
+  if (points.length === 0) return null;
+
+  const nearCloseThreshold = periodTs + PERIOD_DURATION_SECONDS - 2;
+  const fallbackThreshold = periodTs + PERIOD_DURATION_SECONDS - 5;
+  const nearClosePoints = points.filter((point) => point.timestamp >= nearCloseThreshold);
+  const candidate = nearClosePoints[nearClosePoints.length - 1] ?? points[points.length - 1];
+  if (!candidate || candidate.timestamp < fallbackThreshold) {
+    return null;
+  }
+
+  const upBid = candidate.up_bid ?? candidate.up_price;
+  const upAsk = candidate.up_ask ?? candidate.up_price;
+  const downBid = candidate.down_bid ?? candidate.down_price;
+  const downAsk = candidate.down_ask ?? candidate.down_price;
+  const upMid = (upBid + upAsk) / 2;
+  const downMid = (downBid + downAsk) / 2;
+
+  if (!Number.isFinite(upMid) || !Number.isFinite(downMid) || upMid === downMid) {
+    return null;
+  }
+
+  return upMid > downMid ? "Up" : "Down";
+}
 
 function applySyntheticSpread(mid: number): { bid: number; ask: number } {
   const halfSpread = BACKTEST_SYNTHETIC_SPREAD / 2;
@@ -59,12 +120,93 @@ export interface BacktestStats {
 }
 
 export async function loadHistoricalPayload(filePath: string): Promise<HistoricalPayload> {
-  const raw = await readFile(filePath, "utf8");
-  const parsed = JSON.parse(raw) as Partial<HistoricalPayload>;
-  if (!Array.isArray(parsed.histories) || parsed.histories.length === 0) {
-    throw new Error(`Invalid historical payload in ${filePath}: expected non-empty histories array`);
+  const histories: HistoricalPeriod[] = [];
+  let currentPeriod: HistoricalPeriod | null = null;
+  let periodSequence = 0;
+
+  const finalizeCurrentPeriod = (): void => {
+    if (!currentPeriod || currentPeriod.points.length === 0) {
+      currentPeriod = null;
+      return;
+    }
+    currentPeriod.resolved_winner = inferResolvedWinner(
+      currentPeriod.points,
+      currentPeriod.period_ts
+    );
+    histories.push(currentPeriod);
+    currentPeriod = null;
+  };
+
+  const reader = createInterface({
+    input: createReadStream(filePath, { encoding: "utf8" }),
+    crlfDelay: Infinity,
+  });
+
+  for await (const rawLine of reader) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    if (PERIOD_RESET_LINE_PATTERN.test(line)) {
+      finalizeCurrentPeriod();
+      continue;
+    }
+
+    const match = line.match(BTC_QUOTE_LINE_PATTERN);
+    if (!match) continue;
+
+    const [, upBidRaw, upAskRaw, downBidRaw, downAskRaw, remainingRaw, periodTsRaw] = match;
+    const remainingSeconds = parseRemainingTimeSeconds(remainingRaw);
+    const periodTs = Number(periodTsRaw);
+    if (remainingSeconds == null || !Number.isFinite(periodTs)) {
+      continue;
+    }
+
+    const upAsk = clampProbability(Number(upAskRaw));
+    const downAsk = clampProbability(Number(downAskRaw));
+    const upBid = clampBid(Number(upBidRaw), upAsk);
+    const downBid = clampBid(Number(downBidRaw), downAsk);
+    if (![upBid, upAsk, downBid, downAsk].every((value) => Number.isFinite(value))) {
+      continue;
+    }
+
+    if (!currentPeriod || currentPeriod.period_ts !== periodTs) {
+      finalizeCurrentPeriod();
+      currentPeriod = createHistoricalPeriod(periodTs, periodSequence);
+      periodSequence += 1;
+    }
+
+    const elapsedSeconds = Math.max(0, PERIOD_DURATION_SECONDS - remainingSeconds);
+    const point: HistoricalPoint = {
+      timestamp: periodTs + elapsedSeconds,
+      up_price: upAsk,
+      down_price: downAsk,
+      up_bid: upBid,
+      up_ask: upAsk,
+      down_bid: downBid,
+      down_ask: downAsk,
+    };
+
+    const lastPoint = currentPeriod.points[currentPeriod.points.length - 1];
+    if (lastPoint && lastPoint.timestamp === point.timestamp) {
+      currentPeriod.points[currentPeriod.points.length - 1] = point;
+    } else {
+      currentPeriod.points.push(point);
+    }
   }
-  return parsed as HistoricalPayload;
+
+  finalizeCurrentPeriod();
+
+  if (histories.length === 0) {
+    throw new Error(`Invalid historical payload in ${filePath}: expected BTC 15m quote lines in history log`);
+  }
+
+  return {
+    meta: {
+      source: "history.toml",
+      count: histories.length,
+    },
+    histories,
+  };
 }
 
 export function normalizeHistories(payload: HistoricalPayload): HistoricalPeriod[] {
@@ -179,14 +321,27 @@ export async function evaluateBacktest(
       const ts = point.timestamp;
       if (ts < periodTs || ts > periodTs + 900) continue;
 
-      const upPrice = point.up_price;
-      const downPrice = point.down_price;
-      if (!(upPrice > 0 && upPrice < 1 && downPrice > 0 && downPrice < 1)) {
+      const hasActualQuotes =
+        point.up_ask != null &&
+        point.down_ask != null &&
+        point.up_bid != null &&
+        point.down_bid != null;
+      const upQuote = hasActualQuotes
+        ? {
+            bid: clampBid(point.up_bid ?? 0, clampProbability(point.up_ask ?? point.up_price)),
+            ask: clampProbability(point.up_ask ?? point.up_price),
+          }
+        : applySyntheticSpread(point.up_price);
+      const downQuote = hasActualQuotes
+        ? {
+            bid: clampBid(point.down_bid ?? 0, clampProbability(point.down_ask ?? point.down_price)),
+            ask: clampProbability(point.down_ask ?? point.down_price),
+          }
+        : applySyntheticSpread(point.down_price);
+
+      if (!(upQuote.ask > 0 && upQuote.ask < 1 && downQuote.ask > 0 && downQuote.ask < 1)) {
         continue;
       }
-
-      const upQuote = applySyntheticSpread(upPrice);
-      const downQuote = applySyntheticSpread(downPrice);
 
       hasPrices = true;
       lastValidPoint = point;
