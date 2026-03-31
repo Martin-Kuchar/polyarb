@@ -85,6 +85,24 @@ export class DumpHedgeTrader {
     this.stopLossPercentage = stopLossPercentage;
   }
 
+  async updateStrategySettings(
+    sumTarget: number,
+    moveThreshold: number,
+    windowMinutes: number,
+    stopLossMaxWaitMinutes: number,
+    stopLossPercentage: number
+  ): Promise<void> {
+    this.sumTarget = sumTarget;
+    this.moveThreshold = moveThreshold;
+    this.windowMinutes = windowMinutes;
+    this.stopLossMaxWaitMinutes = stopLossMaxWaitMinutes;
+    this.stopLossPercentage = stopLossPercentage;
+
+    logPrintln(
+      `Dump-Hedge Trader: Strategy updated | sumTarget=${this.sumTarget.toFixed(4)} moveThreshold=${this.moveThreshold.toFixed(4)} windowMinutes=${this.windowMinutes} stopLossMaxWaitMinutes=${this.stopLossMaxWaitMinutes} stopLossPercentage=${this.stopLossPercentage.toFixed(4)}`
+    );
+  }
+
   async processSnapshot(snapshot: MarketSnapshot): Promise<void> {
     const marketName = snapshot.marketName;
     const marketData: MarketData = snapshot.btcMarket15m;

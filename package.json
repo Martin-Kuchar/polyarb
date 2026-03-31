@@ -8,7 +8,9 @@
     "start": "node dist/main.js",
     "sim": "node dist/main.js --simulation",
     "prod": "node dist/main.js --production",
-    "dev": "ts-node src/main.ts"
+    "dev": "ts-node src/main.ts",
+    "backtest": "ts-node src/backtester.ts",
+    "optimize": "ts-node src/optimizer.ts"
   },
   "engines": {
     "node": ">=16"

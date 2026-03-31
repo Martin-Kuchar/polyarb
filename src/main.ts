@@ -2,8 +2,17 @@ import { loadConfig } from "./config";
 import { PolymarketApi } from "./api";
 import { MarketMonitor } from "./monitor";
 import { DumpHedgeTrader } from "./dumpHedgeTrader";
+import { runOptimizer, type OptimizerArgs } from "./optimizer";
 import { initHistoryLog, logPrintln } from "./logger";
 import type { Market } from "./models";
+
+const HISTORY_FILE_PATH = "history.toml";
+const DYNAMIC_GA_CONFIG = {
+  population: 8,
+  generations: 4,
+  elite: 2,
+  mutationRate: 0.2,
+};
 
 function parseArgs(): { simulation: boolean } {
   const args = process.argv.slice(2);
@@ -83,7 +92,7 @@ async function discoverMarketForAsset(
 }
 
 async function main(): Promise<void> {
-  initHistoryLog("history.toml");
+  initHistoryLog(HISTORY_FILE_PATH);
 
   const args = parseArgs();
   const config = loadConfig();
@@ -143,6 +152,59 @@ async function main(): Promise<void> {
     stopLossMaxWait,
     stopLossPercentage
   );
+
+  let lastOptimizedPeriod: number | null = null;
+  let optimizerPromise: Promise<void> | null = null;
+
+  const optimizeSimulationStrategy = async (period: number): Promise<void> => {
+    if (!simulation || lastOptimizedPeriod === period) {
+      return;
+    }
+
+    if (optimizerPromise) {
+      await optimizerPromise;
+      if (lastOptimizedPeriod === period) {
+        return;
+      }
+    }
+
+    optimizerPromise = (async () => {
+      const optimizerArgs: OptimizerArgs = {
+        filePath: HISTORY_FILE_PATH,
+        population: DYNAMIC_GA_CONFIG.population,
+        generations: DYNAMIC_GA_CONFIG.generations,
+        elite: DYNAMIC_GA_CONFIG.elite,
+        mutationRate: DYNAMIC_GA_CONFIG.mutationRate,
+        seed: period,
+        reportPath: "cache/ga_last_result.json",
+      };
+
+      logPrintln(
+        `SIMULATION: Running GA optimizer for period ${period} | population=${optimizerArgs.population} generations=${optimizerArgs.generations}`
+      );
+
+      try {
+        const optimization = await runOptimizer(optimizerArgs);
+        await trader.updateStrategySettings(
+          optimization.best.settings.sumTarget,
+          optimization.best.settings.moveThreshold,
+          optimization.best.settings.windowMinutes,
+          optimization.best.settings.stopLossMaxWaitMinutes,
+          optimization.best.settings.stopLossPercentage
+        );
+        lastOptimizedPeriod = period;
+        logPrintln(
+          `SIMULATION: GA applied for period ${period} | fitness=${optimization.best.fitness.toFixed(4)} pnl=$${optimization.best.totalProfit.toFixed(2)}`
+        );
+      } catch (e) {
+        console.warn("Simulation GA optimization failed:", e);
+      } finally {
+        optimizerPromise = null;
+      }
+    })();
+
+    await optimizerPromise;
+  };
 
   setInterval(async () => {
     try {
@@ -213,6 +275,7 @@ async function main(): Promise<void> {
         lastProcessedPeriod = currentPeriod;
 
         try {
+          await optimizeSimulationStrategy(currentPeriod);
           const newMarket = await discoverMarketForAsset(api, asset);
           await monitor.updateMarket(newMarket);
           await trader.resetPeriod();
